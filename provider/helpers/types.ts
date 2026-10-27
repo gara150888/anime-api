@@ -1,5 +1,6 @@
-export type FetchType = "scrap" | "api";
+import type { BodyInit } from "undici-types/fetch";
 
+export type FetchType = "scrap" | "api";
 export type DynamicValue<T = string> = string | ((id: string) => T);
 
 export type EndpointConfig = {
@@ -22,12 +23,18 @@ export type ProviderConfig<P extends Record<string, EndpointInput>> = {
   search?: EndpointInput;
 };
 
+export type ProviderInit = {
+  method: string;
+  headers: Record<string, string>;
+  body?: BodyInit;
+};
+
 export type ProviderRequest = {
   provider: string;
   kind: string;
   fetchType: FetchType;
   url: string;
-  init: RequestInit;
+  init: ProviderInit;
 };
 
 export type ProviderRawResult = {
@@ -37,6 +44,6 @@ export type ProviderRawResult = {
   url: string;
   ok: boolean;
   status: number;
-  data: unknown; // Raw HTML string for "scrap" or parsed JSON for "api"
+  data: unknown;
   error?: string;
 };

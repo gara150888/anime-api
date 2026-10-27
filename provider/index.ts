@@ -1,98 +1,94 @@
-import { createProvider, type ProviderRawResult } from "./helpers/create.provider";
+import { request } from "undici";
+import { headers } from "../helpers";
 
 export const providers = [
-  createProvider({
+
+
+  {
     name: "toonstream",
     baseUrl: "https://toonstream.us",
     fetchType: "scrap",
     paths: {
-      season: "/series/{id}",
-      episode: "/episode/{id}",
-      movie: "/movie/{id}",
+      series: "/series/",
+      episode: "/episode/",
+      movie: "/movie/",
     },
-    // Simple GET search can now just be a template string or EndpointConfig
-    search: "/search/all?q={id}",
-  }),
+    search: (id: string) => `/search/all?q=${id}`,
+    async searchQuery(id: string) {
 
-  createProvider({
+      const { body, statusCode } = await request(`${this.baseUrl}${this.search(id)}`, {
+        headers: { ...headers, Referer: this.baseUrl },
+      })
+
+      if (statusCode !== 200) return {
+        status: statusCode,
+        provider: this.name,
+        message: "error",
+      };
+
+      const res = await body.json();
+
+      return {
+        status: statusCode,
+        provider: this.name,
+        results: ((res) as {
+          data?: { title: string; type: string; url: string }[]
+        }).data?.map(({ url, type, title }) => ({
+          id: url.split("/").filter(Boolean).pop()!,
+          type: type,
+          title,
+        })) ?? [],
+      };
+    }
+  },
+
+  {
     name: "watchanimeworld",
     baseUrl: "https://watchanimeworld.one",
     fetchType: "scrap",
     paths: {
-      season: "/series/{id}",
-      episode: "/episode/{id}",
-      movie: "/movie/{id}",
+      series: "/series/",
+      episode: "/episode/",
+      movie: "/movies/",
     },
-    // Dynamic POST search with automatic URLSearchParams + form-urlencoded header
     search: {
       url: "/wp-admin/admin-ajax.php",
       method: "POST",
-      body: (id) => ({
+      body: (id: string) => ({
         action: "action_tr_search_suggest",
         nonce: "0309aa60a7",
         term: id,
       }),
     },
-  }),
 
-  createProvider({
-    name: "animedekho",
-    baseUrl: "https://animedekho.tv",
-    fetchType: "scrap", // Pages are HTML ("scrap"), while search below overrides to "api"
-    paths: {
-      season: "/series-hindi/{id}",
-      episode: "/epi/{id}",
-      movie: "/movie-hindi/{id}",
-    },
-    search: {
-      url: "/wp-json/dgt/v1/suggest",
-      fetchType: "api", // Search returns JSON directly
-      query: (id) => ({ q: id }),
-    },
-  }),
+    async searchQuery(id: string) {
+      const { body, statusCode } = await request(`${this.baseUrl}${this.search.url}`, {
+        method: this.search.method,
+        headers: { ...headers, Referer: this.baseUrl, "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(this.search.body(id)).toString(),
+      });
 
-  createProvider({
-    name: "desidubanime",
-    baseUrl: "https://desidubanime.me",
-    fetchType: "scrap",
-    paths: {
-      season: "/anime/{id}",
-      episode: "/episode/{id}",
-      movie: "/movie/{id}",
-    },
-  }),
-] as const;
+      if (statusCode !== 200) return {
+        status: statusCode,
+        provider: this.name,
+        message: "error",
+      };
 
-export type ProviderName = (typeof providers)[number]["name"];
+      const results = [...(await body.text())
+        .matchAll(/<li class="fa-play-circle">\s*<a href="([^"]+)"><span class="type-([^"]+)">[^<]*<\/span>(.*?)<\/a>\s*<\/li>/g)]
+        .flatMap(([, url, type, title]) => url && type && title ? [{
+          id: url
+            .replace(this.baseUrl, "")
+            .replace((this.paths[type as keyof typeof this.paths] as string), "")
+            .split("/").reverse()[1],
+          type: type === "movies" ? "movie" : type,
+          title: title.trim()
+        }] : []);
 
-/**
- * Admin helper: Search across all providers that support search in one call.
- * Returns raw HTML/JSON per provider ready to pass to your AI organizer & DB schema.
- */
-export async function searchAllProviders(query: string): Promise<ProviderRawResult[]> {
-  const searchable = providers.filter((p) => Boolean(p.search));
+      return { status: statusCode, provider: this.name, results };
+    }
 
-  return Promise.all(
-    searchable.map((provider) => {
-      const req = provider.getSearchRequest(query);
-      return provider.execute(req);
-    }),
-  );
-}
-
-/**
- * Admin helper: Fetch a specific path (season, episode, movie) from a chosen provider.
- */
-export async function fetchFromProvider(
-  providerName: ProviderName,
-  kind: "season" | "episode" | "movie",
-  id: string,
-): Promise<ProviderRawResult> {
-  const provider = providers.find((p) => p.name === providerName);
-  if (!provider) throw new Error(`Unknown provider: ${providerName}`);
-
-  const req = provider.getRequest(kind, id);
-  return provider.execute(req);
-}
+  }
+] as const
 
 export default providers;
